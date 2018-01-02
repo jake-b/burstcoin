@@ -433,6 +433,12 @@ var NRS = (function(NRS, $, undefined) {
 			data.deadline = String(data.deadline * 60); //hours to minutes
 		}
 
+		if (data.doNotBroadcast) {
+			data.broadcast = "false";
+			delete data.doNotBroadcast;
+			delete data.secretPhrase;
+		}
+
 		if ("secretPhrase" in data && !data.secretPhrase.length && !NRS.rememberPassword) {
 			$form.find(".error_message").html($.t("error_passphrase_required")).show();
 			if (formErrorFunction) {
@@ -470,11 +476,6 @@ var NRS = (function(NRS, $, undefined) {
 					return;
 				}
 			}
-		}
-
-		if (data.doNotBroadcast) {
-			data.broadcast = "false";
-			delete data.doNotBroadcast;
 		}
 
 		NRS.sendRequest(requestType, data, function(response) {
@@ -569,6 +570,57 @@ var NRS = (function(NRS, $, undefined) {
 		if (hide) {
 			$modal.modal("hide");
 		}
+	}
+
+	// Proof of concept signing function for the Ledger Nano S.
+	// Note: the other Ledger apps use the Node.js Buffer() object to work with byte arrays.
+	// I am not a JavaScript developer and don't want to learn, so rather than figure out
+	// Browserfify, I just wrote this proof-of-concept code to act directly on hex strings.
+	NRS.ledgerSign = function() {	
+		var transactionHex = $("#raw_transaction_modal_unsigned_transaction_bytes").val();
+		var transactionLength = transactionHex.length / 2;
+		var apdus = [];
+		var offset = 0;
+
+		while (offset != transactionLength) {
+    		var maxChunkSize = 128;
+    		var chunkSize = (offset + maxChunkSize > transactionLength ? transactionLength - offset : maxChunkSize);
+    		var p1 = (offset + chunkSize == transactionLength ? "80" : "00")
+    		var buffer = "8002" + p1 + "00" + chunkSize.toString(16).padStart(2, '0').toUpperCase()
+      		buffer += transactionHex.substring(offset*2,(offset*2)+(chunkSize*2))
+    		apdus.push(buffer);
+    		offset += chunkSize;
+  		}
+
+  		var localCallback = function(comm) {	 
+			// Send the next apdu of datda
+			var apdu = apdus.shift();
+			response = comm.exchange(apdu, [0x9000]).then(function(response) {
+				if (apdus.length > 0) {
+					// do the next apdu
+					localCallback(comm);
+				} else {					
+					//this was the last apdu response
+					var signatureOffset = 96*2, signatureLen = 64*2;
+					var signedHex = transactionHex.substring(0,signatureOffset) + 
+					                response.substring(0,response.length-4) + 
+					                transactionHex.substring(signatureOffset+signatureLen);
+					$('#raw_transaction_modal_transaction_bytes').val(signedHex);
+					
+				}
+			}).catch(function(reason) {
+				console.log('An error occured: ', reason);
+			});					
+		};
+
+		// Start the the recursion
+		ledger.comm_u2f.create_async().then(function(comm) {
+			comm.setScrambleKey('brs'); // Magic bytes must match what's in the u2f code in the Ledger App
+			localCallback(comm);
+		}).catch(function(reason) {
+			console.log('An error occured: ', reason);
+		});
+
 	}
 
 	return NRS;

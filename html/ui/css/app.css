@@ -2190,16 +2190,16 @@ body > .header .logo .icon {
   border: 0;
 }
 /* Extra to give the user an option to navigate the website [optional]*/
-#registration_link {
+#registration_link, #ledger_login_link {
   color: #fff;
   margin-top: 30px;
   text-align: center;
   text-transform: uppercase;
 }
-#registration_link a, #custom_passphrase_link a {
+#registration_link a, #custom_passphrase_link a, #ledger_login_link a {
   color: rgba(255,255,255,0.5);
 }
-#registration_link a:hover, #custom_passphrase_link a {
+#registration_link a:hover, #custom_passphrase_link a, #ledger_login_link a:hover {
   color: rgba(255,255,255,1.0);
   text-decoration: none;
 }

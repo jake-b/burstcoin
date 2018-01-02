@@ -159,10 +159,7 @@ var NRS = (function(NRS, $, undefined) {
 
 			NRS.state = response;
 
-			//this is done locally..
-			NRS.sendRequest("getAccountId", {
-				"secretPhrase": password
-			}, function(response) {
+			var login_response_function = function(response) {
 				if (!response.errorCode) {
 					NRS.account = String(response.account).escapeHTML();
 					NRS.accountRS = String(response.accountRS).escapeHTML();
@@ -183,15 +180,23 @@ var NRS = (function(NRS, $, undefined) {
 					return;
 				}
 
+				var watch_only = response.watch_only;
 				NRS.sendRequest("getAccountPublicKey", {
 					"account": NRS.account
 				}, function(response) {
 					if (response && response.publicKey && response.publicKey != NRS.generatePublicKey(password)) {
-						$.growl($.t("error_account_taken"), {
-							"type": "danger",
-							"offset": 10
-						});
-						return;
+						if (watch_only != true) {
+							$.growl($.t("error_account_taken"), {
+								"type": "danger",
+								"offset": 10
+							});
+							return;
+						} else {
+							// Can't use stadard 'dashboard_status' div because it is cleared by other functions.
+							// So create a similar div for this purpose
+							var watch_only_message = "You are logged in as a watch-only address.  You will need the full passphrase for most operations."
+							$(".content").prepend($(`<div class="alert-danger alert alert-no-icon" style="padding: 5px; margin-bottom: 15px;">${watch_only_message}</div>`));
+						}						
 					}
 
 				        if ($("#remember_password").is(":checked")) {
@@ -206,7 +211,7 @@ var NRS = (function(NRS, $, undefined) {
 
 					var passwordNotice = "";
 
-					if (password.length < 35) {
+					if (watch_only != true && password.length < 35) {
 						passwordNotice = $.t("error_passphrase_length_secure");
 					} else if (password.length < 50 && (!password.match(/[A-Z]/) || !password.match(/[0-9]/))) {
 						passwordNotice = $.t("error_passphrase_strength_secure");
@@ -279,7 +284,39 @@ var NRS = (function(NRS, $, undefined) {
 
 					NRS.getInitialTransactions();
 				});
-			});
+			};
+
+			if (password.trim().toUpperCase().startsWith("BURST-") && password.length == 26) {
+				// Login to a watch-only address
+				var account_id = password.trim();
+
+				// Get the account information for the given address				
+				NRS.sendRequest("getAccount", {
+					"account": account_id
+				}, function(response) {
+					// If it is successful, set the "watch_only" flag and all the standard
+					// login response logic.
+					if (!response.errorCode) {
+						response.watch_only = true;  // flag to tell later code to disable some checks.
+						login_response_function(response);
+					} else {
+						// Otherwise, show an error.  The address is in the right format perhaps, but
+						// an address does not exist on the blockchain so there's nothing to see.						
+						$.growl("<strong>" + $.t("warning") + "</strong>: " + response.errorDescription, {
+							"type": "danger"
+						});
+					}
+				});
+			} else {
+				// Standard login logic
+				// this is done locally..  'sendRequest' has special logic to prevent
+				// transmitting the passphrase to the server unncessarily via NRS.getAccountId()
+				NRS.sendRequest("getAccountId", {
+					"secretPhrase": password
+				}, login_response_function);
+			}
+
+
 		});
 	}
 
@@ -350,5 +387,27 @@ var NRS = (function(NRS, $, undefined) {
 		NRS.setEncryptionPassword(password);
 		NRS.setServerPassword(password);
 	}
+
+	NRS.ledgerLogin = function() {
+		ledger.comm_u2f.create_async(2).then(function(comm) {
+			comm.setScrambleKey('brs'); // Magic bytes must match what's in the u2f code in the Ledger App
+			var apdu = "8004000000";
+			comm.exchange(apdu, [0x9000]).then(function(response) {
+				response = response.substring(0,response.length-4); //trim off response bytes
+				var address = NRS.getAccountIdFromPublicKey(response, true);
+				NRS.login(address, null);
+			}).catch(function(reason) {
+				var error = "Unable to get public key from Ledger Nano S.";
+				$("#login_error .callout").html(error);
+				$("#login_error").show();				
+			});
+		}).catch(function(reason) {
+			var error = "Unable to get public key from Ledger Nano S.";
+			$("#login_error .callout").html(error);
+			$("#login_error").show();				
+		});
+
+	}
+
 	return NRS;
 }(NRS || {}, jQuery));
